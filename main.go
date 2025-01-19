@@ -5,16 +5,34 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 func main() {
 	store := NewKVStore()
+	snapshotFile := "snapshot.json"
+	err := store.LoadSnapshot(snapshotFile)
+	if err != nil {
+		fmt.Println("Failed to load snapshot:", err)
+		return
+	}
+
+	go func() {
+		for range time.Tick(10 * time.Second) {
+			if err := store.SaveSnapshot(snapshotFile); err != nil {
+				fmt.Println("failed to save snapshot:", err)
+			}
+		}
+	}()
+
 	listener, err := net.Listen("tcp", ":12345")
 	if err != nil {
 		fmt.Println("failed to start the server:", err)
 		return
 	}
 	defer listener.Close()
+
+	fmt.Println("server is running at port 12345")
 
 	for {
 		conn, err := listener.Accept()
