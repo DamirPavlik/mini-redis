@@ -7,6 +7,12 @@ type KeyValueStore struct {
 	mutex sync.RWMutex
 }
 
+func NewKVStore() *KeyValueStore {
+	return &KeyValueStore{
+		store: make(map[string]string),
+	}
+}
+
 func (kvs *KeyValueStore) Get(key string) (string, bool) {
 	kvs.mutex.RLock()
 	defer kvs.mutex.RUnlock()
