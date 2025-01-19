@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mini-redis/store"
 	"net"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -12,6 +13,7 @@ import (
 func main() {
 	store := store.NewKVStore()
 	snapshotFile := "snapshot.json"
+
 	err := store.LoadSnapshot(snapshotFile)
 	if err != nil {
 		fmt.Println("Failed to load snapshot:", err)
@@ -23,6 +25,12 @@ func main() {
 			if err := store.SaveSnapshot(snapshotFile); err != nil {
 				fmt.Println("failed to save snapshot:", err)
 			}
+		}
+	}()
+
+	go func() {
+		for range time.Tick(1 * time.Second) {
+			store.CleanupExpiredKeys()
 		}
 	}()
 
@@ -38,7 +46,7 @@ func main() {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("err acceping conns", err)
+			fmt.Println("err accepting conns", err)
 			continue
 		}
 		go handleConn(conn, store)
@@ -62,12 +70,21 @@ func handleConn(conn net.Conn, store *store.KeyValueStore) {
 }
 
 func handleCommand(command string, store *store.KeyValueStore) string {
-	parts := strings.SplitN(command, " ", 3)
+	parts := strings.SplitN(command, " ", 5)
 	if strings.ToUpper(parts[0]) == "SET" {
 		if len(parts) < 3 {
 			return "err: set requires key and a value"
 		}
-		store.Set(parts[1], parts[2])
+
+		ttl := 0
+		if len(parts) == 5 && strings.ToUpper(parts[3]) == "EX" {
+			ttlValue, err := strconv.Atoi(parts[4])
+			if err != nil {
+				return "err: invalid ttl value"
+			}
+			ttl = ttlValue
+		}
+		store.Set(parts[1], parts[2], ttl)
 		return "ok"
 	}
 
