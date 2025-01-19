@@ -3,13 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"mini-redis/store"
 	"net"
 	"strings"
 	"time"
 )
 
 func main() {
-	store := NewKVStore()
+	store := store.NewKVStore()
 	snapshotFile := "snapshot.json"
 	err := store.LoadSnapshot(snapshotFile)
 	if err != nil {
@@ -44,7 +45,7 @@ func main() {
 	}
 }
 
-func handleConn(conn net.Conn, store *KeyValueStore) {
+func handleConn(conn net.Conn, store *store.KeyValueStore) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
@@ -60,7 +61,7 @@ func handleConn(conn net.Conn, store *KeyValueStore) {
 	}
 }
 
-func handleCommand(command string, store *KeyValueStore) string {
+func handleCommand(command string, store *store.KeyValueStore) string {
 	parts := strings.SplitN(command, " ", 3)
 	if strings.ToUpper(parts[0]) == "SET" {
 		if len(parts) < 3 {
