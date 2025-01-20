@@ -61,11 +61,16 @@ func (kvs *KeyValueStore) LPush(key string, values ...string) int {
 	kvs.mutex.Lock()
 	defer kvs.mutex.Unlock()
 
+	if kvs.lists == nil {
+		kvs.lists = make(map[string][]string)
+	}
+
 	if _, exists := kvs.lists[key]; !exists {
 		kvs.lists[key] = []string{}
 	}
 
 	kvs.lists[key] = append(values, kvs.lists[key]...)
+
 	return len(kvs.lists[key])
 }
 
@@ -73,14 +78,18 @@ func (kvs *KeyValueStore) RPush(key string, values ...string) int {
 	kvs.mutex.Lock()
 	defer kvs.mutex.Unlock()
 
+	if kvs.lists == nil {
+		kvs.lists = make(map[string][]string)
+	}
+
 	if _, exists := kvs.lists[key]; !exists {
 		kvs.lists[key] = []string{}
 	}
 
 	kvs.lists[key] = append(kvs.lists[key], values...)
+
 	return len(kvs.lists[key])
 }
-
 func (kvs *KeyValueStore) LPop(key string) (string, bool) {
 	kvs.mutex.Lock()
 	defer kvs.mutex.Unlock()

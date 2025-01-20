@@ -107,19 +107,19 @@ func handleCommand(command string, store *store.KeyValueStore) string {
 		return "ok"
 	}
 
-	if strings.ToUpper(parts[0]) == "LPUSH" {
-		if len(parts) < 3 {
-			return "err: lpush requires a key and at least one value"
-		}
-		count := store.LPush(parts[1], parts[2:]...)
-		return fmt.Sprintf("ok: %d", count)
-	}
-
 	if strings.ToUpper(parts[0]) == "RPUSH" {
 		if len(parts) < 3 {
 			return "err: rpush requires a key and at least one value"
 		}
 		count := store.RPush(parts[1], parts[2:]...)
+		return fmt.Sprintf("ok: %d", count)
+	}
+
+	if strings.ToUpper(parts[0]) == "LPUSH" {
+		if len(parts) < 3 {
+			return "err: lpush requires a key and at least one value"
+		}
+		count := store.LPush(parts[1], parts[2:]...)
 		return fmt.Sprintf("ok: %d", count)
 	}
 
