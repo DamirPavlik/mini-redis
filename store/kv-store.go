@@ -8,6 +8,9 @@ import (
 
 type KeyValueStore struct {
 	store   map[string]string
+	lists   map[string][]string
+	hashes  map[string]map[string]string
+	sets    map[string]map[string]struct{}
 	expires map[string]time.Time
 	pq      priorityQueue
 	mutex   sync.RWMutex
@@ -17,6 +20,14 @@ type Item struct {
 	key    string
 	expiry time.Time
 	index  int
+}
+
+func NewKVStore() *KeyValueStore {
+	return &KeyValueStore{
+		store:   make(map[string]string),
+		expires: make(map[string]time.Time),
+		pq:      make(priorityQueue, 0),
+	}
 }
 
 type priorityQueue []*Item
@@ -46,12 +57,134 @@ func (pq *priorityQueue) Pop() interface{} {
 	return item
 }
 
-func NewKVStore() *KeyValueStore {
-	return &KeyValueStore{
-		store:   make(map[string]string),
-		expires: make(map[string]time.Time),
-		pq:      make(priorityQueue, 0),
+func (kvs *KeyValueStore) LPush(key string, values ...string) int {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	if _, exists := kvs.lists[key]; !exists {
+		kvs.lists[key] = []string{}
 	}
+
+	kvs.lists[key] = append(values, kvs.lists[key]...)
+	return len(kvs.lists[key])
+}
+
+func (kvs *KeyValueStore) RPush(key string, values ...string) int {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	if _, exists := kvs.lists[key]; !exists {
+		kvs.lists[key] = []string{}
+	}
+
+	kvs.lists[key] = append(kvs.lists[key], values...)
+	return len(kvs.lists[key])
+}
+
+func (kvs *KeyValueStore) LPop(key string) (string, bool) {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	if list, exists := kvs.lists[key]; exists && len(list) > 0 {
+		value := list[0]
+		kvs.lists[key] = list[1:]
+		return value, true
+	}
+
+	return "", false
+}
+
+func (kvs *KeyValueStore) RPop(key string) (string, bool) {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	if list, exists := kvs.lists[key]; exists && len(list) > 0 {
+		value := list[len(list)-1]
+		kvs.lists[key] = list[:len(list)-1]
+		return value, true
+	}
+
+	return "", false
+}
+
+func (kvs *KeyValueStore) HSet(key, field, value string) int {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	if _, exists := kvs.hashes[key]; !exists {
+		kvs.hashes[key] = map[string]string{}
+	}
+
+	_, fieldExists := kvs.hashes[key][field]
+	kvs.hashes[key][field] = value
+
+	if fieldExists {
+		return 0
+	}
+
+	return 1
+}
+
+func (kvs *KeyValueStore) HGet(key, field string) (string, bool) {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	if hash, exists := kvs.hashes[key]; exists {
+		value, fieldExists := hash[field]
+		return value, fieldExists
+	}
+
+	return "", false
+}
+
+func (kvs *KeyValueStore) SAdd(key string, members ...string) int {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	if _, exists := kvs.sets[key]; !exists {
+		kvs.sets[key] = map[string]struct{}{}
+	}
+
+	added := 0
+	for _, member := range members {
+		if _, exists := kvs.sets[key][member]; !exists {
+			kvs.sets[key][member] = struct{}{}
+			added++
+		}
+	}
+
+	return added
+}
+
+func (kvs *KeyValueStore) SRem(key string, members ...string) int {
+	kvs.mutex.Lock()
+	defer kvs.mutex.Unlock()
+
+	removed := 0
+	if set, exists := kvs.sets[key]; exists {
+		for _, member := range members {
+			if _, exists := set[member]; exists {
+				delete(set, member)
+				removed++
+			}
+		}
+	}
+
+	return removed
+}
+
+func (kvs *KeyValueStore) SMember(key string) []string {
+	kvs.mutex.RLock()
+	defer kvs.mutex.RUnlock()
+
+	if set, exists := kvs.sets[key]; exists {
+		members := []string{}
+		for member := range set {
+			members = append(members, member)
+		}
+		return members
+	}
+	return nil
 }
 
 func (kvs *KeyValueStore) Get(key string) (string, bool) {

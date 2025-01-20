@@ -107,5 +107,91 @@ func handleCommand(command string, store *store.KeyValueStore) string {
 		return "ok"
 	}
 
+	if strings.ToUpper(parts[0]) == "LPUSH" {
+		if len(parts) < 3 {
+			return "err: lpush requires a key and at least one value"
+		}
+		count := store.LPush(parts[1], parts[2:]...)
+		return fmt.Sprintf("ok: %d", count)
+	}
+
+	if strings.ToUpper(parts[0]) == "RPUSH" {
+		if len(parts) < 3 {
+			return "err: rpush requires a key and at least one value"
+		}
+		count := store.RPush(parts[1], parts[2:]...)
+		return fmt.Sprintf("ok: %d", count)
+	}
+
+	if strings.ToUpper(parts[0]) == "LPOP" {
+		if len(parts) < 2 {
+			return "err: lpop requires a key"
+		}
+		value, exists := store.LPop(parts[1])
+		if !exists {
+			return "err: key does not exist or list is empty"
+		}
+
+		return value
+	}
+
+	if strings.ToUpper(parts[0]) == "RPOP" {
+		if len(parts) < 2 {
+			return "err: rpop requires a key"
+		}
+		value, exists := store.RPop(parts[1])
+		if !exists {
+			return "err: key does not exist or list is empty"
+		}
+
+		return value
+	}
+
+	if strings.ToUpper(parts[0]) == "HSET" {
+		if len(parts) < 4 {
+			return "err: hset requires a key, field and value"
+		}
+		result := store.HSet(parts[1], parts[2], parts[3])
+		return fmt.Sprintf("ok: %d", result)
+	}
+
+	if strings.ToUpper(parts[0]) == "HGET" {
+		if len(parts) < 3 {
+			return "err: hget requires a key and a field"
+		}
+		value, exists := store.HGet(parts[1], parts[2])
+		if !exists {
+			return "err: field does not exist"
+		}
+		return value
+	}
+
+	if strings.ToUpper(parts[0]) == "SADD" {
+		if len(parts) < 3 {
+			return "err: sadd requires a key and at least one members"
+		}
+		count := store.SAdd(parts[1], parts[2:]...)
+		return fmt.Sprintf("ok: %d", count)
+	}
+
+	if strings.ToUpper(parts[0]) == "SREM" {
+		if len(parts) < 3 {
+			return "err: srem requires a key and at least one member"
+		}
+		count := store.SRem(parts[1], parts[2:]...)
+		return fmt.Sprintf("ok: %d", count)
+	}
+
+	if strings.ToUpper(parts[0]) == "SMEMBERS" {
+		if len(parts) < 2 {
+			return "err: smembers requirse a key"
+		}
+		members := store.SMember(parts[1])
+		if members == nil {
+			return "err: key does not exist"
+		}
+		return strings.Join(members, " ")
+	}
+
 	return "err: command does not exist"
 }
