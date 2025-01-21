@@ -151,8 +151,8 @@ func handleCommand(command string, store *store.KeyValueStore) string {
 		if len(parts) < 4 {
 			return "err: hset requires a key, field and value"
 		}
-		result := store.HSet(parts[1], parts[2], parts[3])
-		return fmt.Sprintf("ok: %d", result)
+		store.HSet(parts[1], parts[2], parts[3])
+		return "ok"
 	}
 
 	if strings.ToUpper(parts[0]) == "HGET" {
