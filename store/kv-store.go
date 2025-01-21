@@ -90,6 +90,7 @@ func (kvs *KeyValueStore) RPush(key string, values ...string) int {
 
 	return len(kvs.lists[key])
 }
+
 func (kvs *KeyValueStore) LPop(key string) (string, bool) {
 	kvs.mutex.Lock()
 	defer kvs.mutex.Unlock()
@@ -116,31 +117,32 @@ func (kvs *KeyValueStore) RPop(key string) (string, bool) {
 	return "", false
 }
 
-func (kvs *KeyValueStore) HSet(key, field, value string) int {
+func (kvs *KeyValueStore) HSet(key, field, value string) {
 	kvs.mutex.Lock()
 	defer kvs.mutex.Unlock()
 
+	if kvs.hashes == nil {
+		kvs.hashes = make(map[string]map[string]string)
+	}
+
 	if _, exists := kvs.hashes[key]; !exists {
-		kvs.hashes[key] = map[string]string{}
+		kvs.hashes[key] = make(map[string]string)
 	}
 
-	_, fieldExists := kvs.hashes[key][field]
 	kvs.hashes[key][field] = value
-
-	if fieldExists {
-		return 0
-	}
-
-	return 1
 }
 
 func (kvs *KeyValueStore) HGet(key, field string) (string, bool) {
-	kvs.mutex.Lock()
-	defer kvs.mutex.Unlock()
+	kvs.mutex.RLock()
+	defer kvs.mutex.RUnlock()
+
+	if kvs.hashes == nil {
+		return "", false
+	}
 
 	if hash, exists := kvs.hashes[key]; exists {
-		value, fieldExists := hash[field]
-		return value, fieldExists
+		value, exists := hash[field]
+		return value, exists
 	}
 
 	return "", false
