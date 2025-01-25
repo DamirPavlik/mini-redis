@@ -10,20 +10,19 @@ func (kvs *KeyValueStore) SaveSnapshot(fileName string) error {
 	kvs.mutex.RLock()
 	defer kvs.mutex.RUnlock()
 
-	snapshot := map[string]interface{}{
-		"store":   kvs.store,
-		"lists":   kvs.lists,
-		"hashes":  kvs.hashes,
-		"sets":    kvs.sets,
-		"expires": kvs.expires,
+	data := map[string]interface{}{
+		"store":  kvs.store,
+		"hashes": kvs.hashes,
+		"lists":  kvs.lists,
+		"sets":   kvs.sets,
 	}
 
-	data, err := json.Marshal(snapshot)
+	dataBytes, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(fileName, data, 0644)
+	return os.WriteFile(fileName, dataBytes, 0644)
 }
 
 func (kvs *KeyValueStore) LoadSnapshot(fileName string) error {
@@ -36,6 +35,22 @@ func (kvs *KeyValueStore) LoadSnapshot(fileName string) error {
 			return nil
 		}
 		return err
+	}
+
+	if kvs.store == nil {
+		kvs.store = make(map[string]string)
+	}
+
+	if kvs.hashes == nil {
+		kvs.hashes = make(map[string]map[string]string)
+	}
+
+	if kvs.lists == nil {
+		kvs.lists = make(map[string][]string)
+	}
+
+	if kvs.sets == nil {
+		kvs.sets = make(map[string]map[string]struct{})
 	}
 
 	snapshot := map[string]interface{}{}
