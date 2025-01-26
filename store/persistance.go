@@ -40,17 +40,17 @@ func (kvs *KeyValueStore) LoadSnapshot(fileName string) error {
 	if kvs.store == nil {
 		kvs.store = make(map[string]string)
 	}
-
 	if kvs.hashes == nil {
 		kvs.hashes = make(map[string]map[string]string)
 	}
-
 	if kvs.lists == nil {
 		kvs.lists = make(map[string][]string)
 	}
-
 	if kvs.sets == nil {
 		kvs.sets = make(map[string]map[string]struct{})
+	}
+	if kvs.expires == nil {
+		kvs.expires = make(map[string]time.Time)
 	}
 
 	snapshot := map[string]interface{}{}
