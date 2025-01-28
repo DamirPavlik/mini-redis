@@ -3,195 +3,200 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
+	"mini-redis/protocol"
 	"mini-redis/store"
 	"net"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
-func main() {
-	store := store.NewKVStore()
-	snapshotFile := "snapshot.json"
+const snapshotFile = "snapshot.json"
 
-	err := store.LoadSnapshot(snapshotFile)
-	if err != nil {
-		fmt.Println("Failed to load snapshot:", err)
-		return
+func main() {
+	kvStore := store.NewKVStore()
+
+	if err := kvStore.LoadSnapshot(snapshotFile); err != nil {
+		fmt.Printf("Error loading snapshot: %v\n", err)
+	} else {
+		fmt.Println("Snapshot loaded successfully.")
 	}
 
-	go func() {
-		for range time.Tick(10 * time.Second) {
-			if err := store.SaveSnapshot(snapshotFile); err != nil {
-				fmt.Println("failed to save snapshot:", err)
-			}
-		}
-	}()
+	go periodicSnapshot(kvStore, snapshotFile, 30*time.Second)
 
-	go func() {
-		for range time.Tick(1 * time.Second) {
-			store.CleanupExpiredKeys()
-		}
-	}()
+	go handleSignals(kvStore, snapshotFile)
 
-	listener, err := net.Listen("tcp", ":12345")
+	listener, err := net.Listen("tcp", ":6379")
 	if err != nil {
-		fmt.Println("failed to start the server:", err)
+		fmt.Println("Error starting server:", err)
 		return
 	}
 	defer listener.Close()
 
-	fmt.Println("server is running at port 12345")
-
+	fmt.Println("Redis-like server is running on :6379...")
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("err accepting conns", err)
+			fmt.Println("Error accepting connection:", err)
 			continue
 		}
-		go handleConn(conn, store)
+		go handleConnection(conn, kvStore)
 	}
 }
 
-func handleConn(conn net.Conn, store *store.KeyValueStore) {
+func periodicSnapshot(kvStore *store.KeyValueStore, file string, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if err := kvStore.SaveSnapshot(file); err != nil {
+			fmt.Printf("Error saving snapshot: %v\n", err)
+		} else {
+			fmt.Println("Snapshot saved successfully.")
+		}
+	}
+}
+
+func handleSignals(kvStore *store.KeyValueStore, file string) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	fmt.Println("\nReceived termination signal, saving snapshot...")
+	if err := kvStore.SaveSnapshot(file); err != nil {
+		fmt.Printf("Error saving snapshot during shutdown: %v\n", err)
+	} else {
+		fmt.Println("Snapshot saved successfully.")
+	}
+	os.Exit(0)
+}
+
+func handleConnection(conn net.Conn, kvStore *store.KeyValueStore) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
 	for {
-		command, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println("err reading command:", err)
-			return
+		command, err := protocol.ParseRESP(reader)
+		if err == io.EOF {
+			break
 		}
-
-		response := handleCommand(strings.TrimSpace(command), store)
-		conn.Write([]byte(response + "\n"))
+		if err != nil {
+			protocol.EncodeError(conn, "ERR invalid input")
+			continue
+		}
+		response := executeCommand(kvStore, command)
+		conn.Write(response)
 	}
 }
 
-func handleCommand(command string, store *store.KeyValueStore) string {
-	parts := strings.SplitN(command, " ", 5)
-	if strings.ToUpper(parts[0]) == "SET" {
-		if len(parts) < 3 {
-			return "err: set requires key and a value"
-		}
+func executeCommand(kvStore *store.KeyValueStore, command []string) []byte {
+	if len(command) == 0 {
+		return protocol.EncodeError(nil, "ERR empty command")
+	}
 
+	cmd := strings.ToUpper(command[0])
+	args := command[1:]
+
+	switch cmd {
+	case "SET":
+		if len(args) < 2 || len(args) > 3 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'SET' command")
+		}
 		ttl := 0
-		if len(parts) == 5 && strings.ToUpper(parts[3]) == "EX" {
-			ttlValue, err := strconv.Atoi(parts[4])
+		if len(args) == 3 {
+			parsedTTL, err := strconv.Atoi(args[2])
 			if err != nil {
-				return "err: invalid ttl value"
+				return protocol.EncodeError(nil, "ERR invalid TTL value")
 			}
-			ttl = ttlValue
+			ttl = parsedTTL
 		}
-		store.Set(parts[1], parts[2], ttl)
-		return "ok"
-	}
-
-	if strings.ToUpper(parts[0]) == "GET" {
-		if len(parts) < 2 {
-			return "err: get requires a key"
+		kvStore.Set(args[0], args[1], ttl)
+		return protocol.EncodeSimpleString("OK")
+	case "GET":
+		if len(args) != 1 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'GET' command")
 		}
-		value, exists := store.Get(parts[1])
+		value, exists := kvStore.Get(args[0])
 		if !exists {
-			return "err: key does not exist"
+			return protocol.EncodeBulkString("")
 		}
-		return value
-	}
-
-	if strings.ToUpper(parts[0]) == "DEL" {
-		if len(parts) < 2 {
-			return "err: del requires a key"
+		return protocol.EncodeBulkString(value)
+	case "DEL":
+		if len(args) == 0 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'DEL' command")
 		}
-		store.Del(parts[1])
-		return "ok"
-	}
-
-	if strings.ToUpper(parts[0]) == "RPUSH" {
-		if len(parts) < 3 {
-			return "err: rpush requires a key and at least one value"
+		for _, key := range args {
+			kvStore.Del(key)
 		}
-		count := store.RPush(parts[1], parts[2:]...)
-		return fmt.Sprintf("ok: %d", count)
-	}
-
-	if strings.ToUpper(parts[0]) == "LPUSH" {
-		if len(parts) < 3 {
-			return "err: lpush requires a key and at least one value"
+		return protocol.EncodeInteger(int64(len(args)))
+	case "RPUSH":
+		if len(args) < 2 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'RPUSH' command")
 		}
-		count := store.LPush(parts[1], parts[2:]...)
-		return fmt.Sprintf("ok: %d", count)
-	}
-
-	if strings.ToUpper(parts[0]) == "LPOP" {
-		if len(parts) < 2 {
-			return "err: lpop requires a key"
+		length := kvStore.RPush(args[0], args[1:]...)
+		return protocol.EncodeInteger(int64(length))
+	case "LPUSH":
+		if len(args) < 2 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'LPUSH' command")
 		}
-		value, exists := store.LPop(parts[1])
+		length := kvStore.LPush(args[0], args[1:]...)
+		return protocol.EncodeInteger(int64(length))
+	case "LPOP":
+		if len(args) != 1 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'LPOP' command")
+		}
+		value, exists := kvStore.LPop(args[0])
 		if !exists {
-			return "err: key does not exist or list is empty"
+			return protocol.EncodeBulkString("")
 		}
-
-		return value
-	}
-
-	if strings.ToUpper(parts[0]) == "RPOP" {
-		if len(parts) < 2 {
-			return "err: rpop requires a key"
+		return protocol.EncodeBulkString(value)
+	case "RPOP":
+		if len(args) != 1 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'RPOP' command")
 		}
-		value, exists := store.RPop(parts[1])
+		value, exists := kvStore.RPop(args[0])
 		if !exists {
-			return "err: key does not exist or list is empty"
+			return protocol.EncodeBulkString("")
 		}
-
-		return value
-	}
-
-	if strings.ToUpper(parts[0]) == "HSET" {
-		if len(parts) < 4 {
-			return "err: hset requires a key, field and value"
+		return protocol.EncodeBulkString(value)
+	case "HSET":
+		if len(args) != 3 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'HSET' command")
 		}
-		store.HSet(parts[1], parts[2], parts[3])
-		return "ok"
-	}
-
-	if strings.ToUpper(parts[0]) == "HGET" {
-		if len(parts) < 3 {
-			return "err: hget requires a key and a field"
+		kvStore.HSet(args[0], args[1], args[2])
+		return protocol.EncodeInteger(1)
+	case "HGET":
+		if len(args) != 2 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'HGET' command")
 		}
-		value, exists := store.HGet(parts[1], parts[2])
+		value, exists := kvStore.HGet(args[0], args[1])
 		if !exists {
-			return "err: field does not exist"
+			return protocol.EncodeBulkString("")
 		}
-		return value
+		return protocol.EncodeBulkString(value)
+	case "SADD":
+		if len(args) < 2 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'SADD' command")
+		}
+		count := kvStore.SAdd(args[0], args[1:]...)
+		return protocol.EncodeInteger(int64(count))
+	case "SREM":
+		if len(args) < 2 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'SREM' command")
+		}
+		count := kvStore.SRem(args[0], args[1:]...)
+		return protocol.EncodeInteger(int64(count))
+	case "SMEMBERS":
+		if len(args) != 1 {
+			return protocol.EncodeError(nil, "ERR wrong number of arguments for 'SMEMBERS' command")
+		}
+		members := kvStore.SMember(args[0])
+		return protocol.EncodeArray(members)
+	default:
+		return protocol.EncodeError(nil, fmt.Sprintf("ERR unknown command '%s'", cmd))
 	}
-
-	if strings.ToUpper(parts[0]) == "SADD" {
-		if len(parts) < 3 {
-			return "err: sadd requires a key and at least one members"
-		}
-		count := store.SAdd(parts[1], parts[2:]...)
-		return fmt.Sprintf("ok: %d", count)
-	}
-
-	if strings.ToUpper(parts[0]) == "SREM" {
-		if len(parts) < 3 {
-			return "err: srem requires a key and at least one member"
-		}
-		count := store.SRem(parts[1], parts[2:]...)
-		return fmt.Sprintf("ok: %d", count)
-	}
-
-	if strings.ToUpper(parts[0]) == "SMEMBERS" {
-		if len(parts) < 2 {
-			return "err: smembers requirse a key"
-		}
-		members := store.SMember(parts[1])
-		if members == nil {
-			return "err: key does not exist"
-		}
-		return strings.Join(members, " ")
-	}
-
-	return "err: command does not exist"
 }
