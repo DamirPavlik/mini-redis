@@ -22,6 +22,49 @@ func NewClient(address string) (*Client, error) {
 	return &Client{conn: conn}, nil
 }
 
+func (c *Client) readResponse() (string, error) {
+	reader := bufio.NewReader(c.conn)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+	line = strings.TrimSpace(line)
+
+	switch line[0] {
+	case '+':
+		return line[1:], nil
+	case '-':
+		return "", fmt.Errorf("redis error: %s", line[1:])
+	case ':':
+		return line[1:], nil
+	case '$':
+		var length int
+		fmt.Sscanf(line, "$%d", &length)
+		if length == -1 {
+			return "", nil
+		}
+		data := make([]byte, length+2)
+		_, err := reader.Read(data)
+		if err != nil {
+			return "", fmt.Errorf("failed to read bulk string: %w", err)
+		}
+		return string(data[:length]), nil
+	case '*':
+		var count int
+		fmt.Sscanf(line, "*%d", &count)
+		var result []string
+		for i := 0; i < count; i++ {
+			resp, err := c.readResponse()
+			if err != nil {
+				return "", err
+			}
+			result = append(result, resp)
+		}
+		return strings.Join(result, "\n"), nil
+	}
+	return "", fmt.Errorf("unknown response type: %s", line)
+}
+
 func (c *Client) sendCommand(command []string) (string, error) {
 	var buffer bytes.Buffer
 	buffer.WriteString(fmt.Sprintf("*%d\r\n", len(command)))
@@ -34,13 +77,7 @@ func (c *Client) sendCommand(command []string) (string, error) {
 		return "", fmt.Errorf("failed to send command: %w", err)
 	}
 
-	reader := bufio.NewReader(c.conn)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("failed to receive response: %w", err)
-	}
-
-	return strings.TrimSpace(response), nil
+	return c.readResponse()
 }
 
 func (c *Client) Close() error {
