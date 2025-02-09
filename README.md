@@ -1,6 +1,6 @@
 # Mini Redis
 
-**Mini Redis** is a lightweight, in-memory key-value store inspired by Redis with custom built RESP protocol, implemented in Go. It supports basic Redis commands such as `SET`, `GET`, `DEL`, lists, sets, and hashes.
+**Mini Redis** is a lightweight, in-memory key-value store inspired by Redis with custom built RESP protocol, implemented in Go. It supports basic Redis commands such as `SET`, `GET`, `DEL`, lists, sets, and hashes and TTL for `SET`.
 
 ## Features
 
